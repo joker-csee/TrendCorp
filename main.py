@@ -108,5 +108,34 @@ def main():
     initialize()
 
 
+def dashboard():
+    """M2: 终端仪表盘模式。"""
+    import sys
+    cfg = AppConfig()
+    setup_logging(cfg.log_dir, cfg.log_level)
+    logger = logging.getLogger("app")
+
+    # 初始化数据层
+    market = MarketProvider()
+    financial = FinancialProvider()
+    sector_repo = SectorRepository(cfg.db_path)
+    nav_repo = NavRepository(cfg.db_path)
+
+    # 确保 DB 存在
+    _init_db(cfg.db_path)
+    # 跳过重复的板块拉取（如果已有数据）
+    existing = nav_repo.get_latest()
+    if not existing:
+        _init_sectors(market, sector_repo)
+        _init_initial_nav(cfg, nav_repo)
+
+    from engine.dashboard import build_dashboard, print_dashboard
+    data = build_dashboard(cfg, market, financial, sector_repo, nav_repo)
+    print_dashboard(data)
+
+
 if __name__ == "__main__":
-    main()
+    if "--dashboard" in __import__("sys").argv:
+        dashboard()
+    else:
+        main()
