@@ -121,13 +121,14 @@ def dashboard():
     sector_repo = SectorRepository(cfg.db_path)
     nav_repo = NavRepository(cfg.db_path)
 
-    # 确保 DB 存在
+    # P1-6 修复: 先检查板块数据是否存在，存在则跳过拉取
     _init_db(cfg.db_path)
-    # 跳过重复的板块拉取（如果已有数据）
-    existing = nav_repo.get_latest()
-    if not existing:
+    existing_sectors = sector_repo.get_all_active()
+    if existing_sectors:
+        logger.info("板块数据已存在（%d 个），跳过拉取", len(existing_sectors))
+    else:
         _init_sectors(market, sector_repo)
-        _init_initial_nav(cfg, nav_repo)
+    _init_initial_nav(cfg, nav_repo)
 
     from engine.dashboard import build_dashboard, print_dashboard
     data = build_dashboard(cfg, market, financial, sector_repo, nav_repo)

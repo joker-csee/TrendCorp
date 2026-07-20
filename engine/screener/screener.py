@@ -3,6 +3,7 @@ import logging
 from datetime import date, timedelta
 from dataclasses import dataclass
 
+import akshare as ak
 import pandas as pd
 
 from data.providers.market_provider import MarketProvider
@@ -48,20 +49,41 @@ class CoreScreener:
         self.top_n = top_n
         self.logger = logging.getLogger("app.screener")
 
-    def screen(self, sector_code: str, sector_name: str,
+    # P1-5 修复: screen() 签名增加 sec_type，用于 API 路由
+    def screen(self, sector_code: str, sector_name: str, sec_type: str,
                snap_date: date) -> list[CoreScoreResult]:
         """对板块内所有成分股进行五维评分，返回 top_n。"""
         try:
-            stocks = self._get_sector_stocks(sector_code)
+            stocks = self._get_sector_stocks(sector_code, sec_type)
         except Exception as e:
             self.logger.warning("板块 %s 成分股获取失败: %s", sector_code, e)
             return []
 
+        # P1-2 修复: 先收集所有个股的成交量，计算板块内真实排名
+        vol_map = {}
+        for _, s in stocks.iterrows():
+            code = str(s.get("代码", ""))
+            if not code or len(code) < 6:
+                continue
+            try:
+                start = snap_date - timedelta(days=40)
+                df = self.market.fetch_stock_daily(code, start, snap_date)
+                if len(df) >= 20 and "volume" in df.columns:
+                    vol_map[code] = df["volume"].tail(20).mean()
+            except Exception:
+                pass
+
+        sorted_vols = sorted(vol_map.items(), key=lambda x: x[1], reverse=True)
+        rank_map = {code: i + 1 for i, (code, _) in enumerate(sorted_vols)}
+        self.logger.debug("板块 %s: %d 只有效排名", sector_name, len(rank_map))
+
         results = []
         for _, s in stocks.iterrows():
             try:
-                result = self._score_one(s, snap_date)
-                if result is not None:
+                code = str(s.get("代码", ""))
+                rank = rank_map.get(code, 999)
+                result = self._score_one(s, snap_date, rank)
+                if result is not None and result.total_score >= self.threshold:
                     results.append(result)
             except Exception as e:
                 self.logger.debug("个股 %s 评分跳过: %s", s.get("代码", "?"), e)
@@ -75,7 +97,7 @@ class CoreScreener:
         return top
 
     def _score_one(self, stock_info,
-                   snap_date: date) -> CoreScoreResult | None:
+                   snap_date: date, liq_rank: int = 99) -> CoreScoreResult | None:
         code = str(stock_info.get("代码", ""))
         name = str(stock_info.get("名称", ""))
         sector_code = str(stock_info.get("板块代码", ""))
@@ -98,8 +120,7 @@ class CoreScreener:
         mc = self.financial.fetch_market_cap(code) or 0
         mcs = market_cap.calc_market_cap_score(mc)
 
-        avg_vol = df["volume"].tail(20).mean() if "volume" in df.columns else 0
-        liq_rank = self._estimate_rank(code, avg_vol)
+        # P1-2 修复: 使用真实板块内排名
         liq = liquidity.calc_liquidity_score(liq_rank)
 
         mas = ma_structure.calc_ma_structure_score(ma5_val, ma10_val, ma21_val, ma55_val)
@@ -117,9 +138,6 @@ class CoreScreener:
                  mas * self.weights["ma_structure"] +
                  vh * self.weights["vol_health"] +
                  fund * self.weights["fundamental"])
-
-        if total < self.threshold:
-            return None
 
         # MA 偏离度
         dev = None
@@ -145,7 +163,19 @@ class CoreScreener:
             ma_deviation=dev, vol_ratio_20=vol_ratio,
         )
 
-    def _get_sector_stocks(self, sector_code: str) -> pd.DataFrame:
+    # P1-5 修复: 按 sec_type 路由到正确的 API
+    def _get_sector_stocks(self, sector_code: str, sec_type: str) -> pd.DataFrame:
+        if sec_type == "industry":
+            try:
+                return ak.stock_board_industry_cons_em(symbol=sector_code)
+            except Exception:
+                pass
+        elif sec_type == "concept":
+            try:
+                return ak.stock_board_concept_cons_em(symbol=sector_code)
+            except Exception:
+                pass
+        # fallback: 两种都试
         try:
             return ak.stock_board_concept_cons_em(symbol=sector_code)
         except Exception:
@@ -157,30 +187,17 @@ class CoreScreener:
         return pd.DataFrame()
 
     @staticmethod
-    def _estimate_rank(code: str, avg_vol: float) -> int:
-        # 没有全市场排名的简化实现：返回中等排名
-        if avg_vol > 1e9:
-            return 3
-        if avg_vol > 5e8:
-            return 5
-        if avg_vol > 1e8:
-            return 8
-        return 12
-
-    @staticmethod
     def _calc_vol_profile(df: pd.DataFrame):
+        """P2-4 修复: pct_change() 第一个值 fillna(False) 消除 NaN。"""
         if "close" not in df.columns or "volume" not in df.columns:
             return 0, 0, 0, 0
         if len(df) < 20:
             return 0, 0, 0, 0
-        up_mask = df["close"].pct_change() > 0
-        dn_mask = df["close"].pct_change() < 0
+        ret = df["close"].pct_change().fillna(0.0)
+        up_mask = ret > 0
+        dn_mask = ret < 0
         up_avg = df.loc[up_mask, "volume"].mean() if up_mask.any() else 0
         dn_avg = df.loc[dn_mask, "volume"].mean() if dn_mask.any() else 0
         pb_vol = df["volume"].tail(5).min()
         pk_vol = df["volume"].max()
         return up_avg, dn_avg, pb_vol, pk_vol
-
-
-# 延迟导入避免循环
-import akshare as ak

@@ -143,7 +143,12 @@ class MarketScanner:
 
     @staticmethod
     def _estimate_volume_ratio(df: pd.DataFrame, days: int = 5) -> float:
-        """板块成交额近 5 日均值 / 近 20 日均值（简化版成交占比替代）。"""
+        """板块成交额近 5 日均值 / 近 20 日均值（环比放量指标）。
+
+        P1-1: FIXME(M3) — 当前实现测量的是板块自身的时序放量程度，
+        非规格定义的"板块成交额占全市场比重 vs 板块市值占全市场比重"。
+        M3 需要引入全市场成交额和板块流通市值数据源。
+        """
         if "amount" not in df.columns or len(df) < 20:
             return 1.0
         avg5 = df["amount"].tail(days).mean()

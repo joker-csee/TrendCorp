@@ -45,9 +45,21 @@ def build_dashboard(cfg: AppConfig, market: MarketProvider,
     weekly = latest_nav.get("weekly_return", 0) or 0 if latest_nav else 0
     monthly = latest_nav.get("monthly_return", 0) or 0 if latest_nav else 0
 
-    # 主线扫描
+    # P0-2 修复: 主线扫描异常时生成降级面板
     scanner = MarketScanner(market, cfg.scanner.weights, cfg.scanner.candidate_threshold)
-    scan_results = scanner.scan_all(today)
+    try:
+        scan_results = scanner.scan_all(today)
+    except RuntimeError as e:
+        logger.warning("主线扫描失败（数据不可用），生成降级面板: %s", e)
+        return DashboardData(
+            date=str(today), total_nav=total_nav, daily_return=daily,
+            weekly_return=weekly, monthly_return=monthly,
+            position_pct=pos_pct, cash=cash,
+            # P2-2: FIXME(M4) — 需从 RiskRepository 读取实际熔断状态
+            fuse_level="NORMAL",
+            themes=[], signals=[],
+        )
+
     selector = ThemeSelector(cfg.scanner.confirmed_min_score)
     classified = selector.confirm(scan_results)
     themes = classified["confirmed"]
@@ -59,8 +71,12 @@ def build_dashboard(cfg: AppConfig, market: MarketProvider,
     signals = []
 
     for theme in themes[:3]:
+        # P1-5 修复: 传递 sec_type
         cores = screener.screen(
-            theme.get("sector_code", ""), theme.get("sector_name", ""), today
+            theme.get("sector_code", ""),
+            theme.get("sector_name", ""),
+            theme.get("sec_type", "concept"),
+            today,
         )
         for core in cores:
             sig_result = ma_mon.check(core.stock_code, today)
