@@ -127,7 +127,11 @@ def dashboard():
     if existing_sectors:
         logger.info("板块数据已存在（%d 个），跳过拉取", len(existing_sectors))
     else:
-        _init_sectors(market, sector_repo)
+        # N1: sector 表为空 + API 不可用时不应崩溃
+        try:
+            _init_sectors(market, sector_repo)
+        except RuntimeError as e:
+            logger.warning("板块初始化失败（网络不可用）: %s", e)
     _init_initial_nav(cfg, nav_repo)
 
     from engine.dashboard import build_dashboard, print_dashboard
