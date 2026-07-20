@@ -8,8 +8,15 @@ class FinancialProvider(BaseProvider):
     """个股财务数据：营收增速、净利润增速、ROE、流通市值。"""
 
     def fetch_financials(self, code: str) -> dict:
-        """返回最近季度财务指标。"""
-        return self.fetch_with_retry(self._do_fetch_financials, code)
+        """返回最近季度财务指标。
+        P1-3 修复: 关键字段全 None 时抛出异常，而非静默返回。
+        """
+        result = self.fetch_with_retry(self._do_fetch_financials, code)
+        if result["revenue_yoy"] is None and result["roe"] is None:
+            raise RuntimeError(
+                f"{code} 财务数据拉取失败：revenue_yoy 和 roe 均为 None"
+            )
+        return result
 
     def _do_fetch_financials(self, code: str) -> dict:
         result = {
@@ -66,7 +73,7 @@ class FinancialProvider(BaseProvider):
                     val = row.loc["流通市值", "value"]
                     if isinstance(val, str):
                         val = float(val.replace(",", "").replace("亿", ""))
-                    return float(val) / 1e8  # 转换为亿
+                    return float(val) / 1e8
         except Exception as e:
             self.logger.warning(f"{code} 市值拉取失败: {e}")
         return None

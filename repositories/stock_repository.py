@@ -42,3 +42,12 @@ class StockRepository:
                 "SELECT * FROM stock WHERE code = ?", (code,)
             ).fetchone()
             return dict(row) if row else None
+
+    def get_by_sector(self, sector_id: int) -> list[dict]:
+        """P2-3: 按板块查询个股列表（Screener 需要）。"""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM stock WHERE sector_id = ?",
+                (sector_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS sector (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     code            TEXT NOT NULL UNIQUE,
     name            TEXT NOT NULL,
-    type            TEXT NOT NULL CHECK (type IN ('sw_industry', 'concept')),
+    type            TEXT NOT NULL CHECK (type IN ('industry', 'concept')),
     is_active       INTEGER DEFAULT 1,
     created_at      TEXT DEFAULT (datetime('now','localtime'))
 );

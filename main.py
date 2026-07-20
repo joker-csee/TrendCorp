@@ -14,16 +14,21 @@ from repositories.nav_repository import NavRepository
 
 
 def _init_db(db_path: str):
-    """执行 schema.sql 建表。"""
+    """执行 schema.sql 建表 + 启用 WAL 模式。
+
+    P2-2: DDL 操作天然不适合 Repository 模式（建表不属于 CRUD），
+    故直接在连接上执行。P2-4: 同时启用 WAL 防止后续并发写锁冲突。
+    """
     schema_path = os.path.join(os.path.dirname(__file__), "data", "schema.sql")
     if not os.path.exists(schema_path):
         raise FileNotFoundError(f"schema.sql 不存在: {schema_path}")
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
         with open(schema_path, encoding="utf-8") as f:
             conn.executescript(f.read())
         conn.commit()
-        logging.getLogger("init").info("数据库初始化完成")
+        logging.getLogger("init").info("数据库初始化完成 (WAL 模式)")
     finally:
         conn.close()
 
