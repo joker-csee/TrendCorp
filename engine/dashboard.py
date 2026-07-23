@@ -111,7 +111,7 @@ def build_dashboard(cfg: AppConfig, market: MarketProvider,
     return DashboardData(
         date=str(today), total_nav=total_nav, daily_return=daily,
         weekly_return=weekly, monthly_return=monthly,
-        position_pct=pos_pct, cash=cash, fuse_level="NORMAL",
+        position_pct=pos_pct, cash=cash, fuse_level=fuse_level,
         themes=themes, signals=signals,
     )
 
