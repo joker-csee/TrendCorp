@@ -12,6 +12,7 @@ from engine.theme_selector import ThemeSelector
 from engine.ma_monitor import MAMonitor
 from repositories.sector_repository import SectorRepository
 from repositories.nav_repository import NavRepository
+from repositories.risk_repository import RiskRepository
 
 
 @dataclass
@@ -30,7 +31,8 @@ class DashboardData:
 
 def build_dashboard(cfg: AppConfig, market: MarketProvider,
                     financial: FinancialProvider, sector_repo: SectorRepository,
-                    nav_repo: NavRepository) -> DashboardData:
+                    nav_repo: NavRepository,
+                    risk_repo: RiskRepository = None) -> DashboardData:
     """M2 终端仪表盘数据聚合。"""
     logger = logging.getLogger("app.dashboard")
     today = date.today()
@@ -45,6 +47,21 @@ def build_dashboard(cfg: AppConfig, market: MarketProvider,
     weekly = latest_nav.get("weekly_return", 0) or 0 if latest_nav else 0
     monthly = latest_nav.get("monthly_return", 0) or 0 if latest_nav else 0
 
+    # P0-2: 从 RiskRepository 读取实际熔断状态
+    fuse_level = "NORMAL"
+    if risk_repo:
+        events = risk_repo.get_recent(limit=1)
+        if events:
+            level_map = {
+                "L1_STOCK": "STOCK_STOP",
+                "L2_DAILY": "DAILY_BAN",
+                "L2_WEEKLY": "WEEKLY_BAN",
+                "L3_MONTHLY": "MONTHLY_BAN",
+            }
+            fuse_level = level_map.get(
+                events[0].get("event_level", ""), "NORMAL"
+            )
+
     # P0-2 修复: 主线扫描异常时生成降级面板
     scanner = MarketScanner(market, cfg.scanner.weights, cfg.scanner.candidate_threshold)
     try:
@@ -55,8 +72,7 @@ def build_dashboard(cfg: AppConfig, market: MarketProvider,
             date=str(today), total_nav=total_nav, daily_return=daily,
             weekly_return=weekly, monthly_return=monthly,
             position_pct=pos_pct, cash=cash,
-            # P2-2: FIXME(M4) — 需从 RiskRepository 读取实际熔断状态
-            fuse_level="NORMAL",
+            fuse_level=fuse_level,
             themes=[], signals=[],
         )
 

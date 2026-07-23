@@ -24,14 +24,7 @@ class TradeOrder:
 
 
 class PositionManager:
-    """D-1 仓位管理器：计算建仓/加仓/减仓比例，执行所有硬上限裁剪。
-
-    硬约束（来自 config.PositionConfig）：
-    - total_cap:     总仓位 ≤ 70%
-    - single_cap:    单票 ≤ 30%
-    - sector_cap:    单板块 ≤ 35%
-    - cash_min:      最低现金保留 ≥ 30%
-    """
+    """D-1 仓位管理器。"""
 
     def __init__(self, total_cap: float = 0.70, single_cap: float = 0.30,
                  sector_cap: float = 0.35, cash_min: float = 0.30,
@@ -44,16 +37,21 @@ class PositionManager:
         self.b_buy_first = b_buy_first
         self.logger = logging.getLogger("app.position_mgr")
 
+    # P1-3 修复: 新增 fuse_level 参数，内部检查熔断
     def calc_buy(self, signal: str, stock_code: str,
                  current_stock_pct: float, current_total_pct: float,
                  current_sector_pct: float = 0.0,
-                 ma10: float = None) -> TradeOrder | None:
-        """计算建仓指令。
+                 ma10: float = None,
+                 fuse_level=None) -> 'TradeOrder | None':
+        """计算建仓指令。fuse_level 不为 NORMAL 时禁止开仓。"""
+        # P1-3: 熔断时内部拒绝，不再依赖调用方
+        from engine.risk_controller import FuseLevel, RiskController
+        if fuse_level is not None and RiskController.is_blocked(fuse_level):
+            self.logger.warning(
+                "风控熔断状态 %s，禁止开仓", fuse_level.value
+            )
+            return None
 
-        signal: 'A_BUY' | 'B_BUY'
-        返回 TradeOrder 或 None（触发限制时）。
-        """
-        # BRT-05: 熔断时禁止开仓（由调用方在调用前检查）
         if current_total_pct >= self.total_cap:
             self.logger.warning(
                 "总仓位已达上限 %.0f%%，拒绝开仓 %s",
@@ -68,7 +66,6 @@ class PositionManager:
             )
             return None
 
-        # 计算目标仓位
         if signal == "A_BUY":
             target_pct = self.single_cap * self.a_buy_first
         elif signal == "B_BUY":
@@ -81,8 +78,10 @@ class PositionManager:
         if target_pct > room_total:
             old = target_pct
             target_pct = room_total
-            self.logger.info(
-                "总仓位限制: %.1f%% -> %.1f%%", old * 100, target_pct * 100,
+            # P2-2: 裁剪日志使用 WARNING
+            self.logger.warning(
+                "总仓位将触及上限 %d%%，建仓比例从 %.1f%% 调整为 %.1f%%",
+                int(self.total_cap * 100), old * 100, target_pct * 100,
             )
 
         # 裁剪：单票上限
@@ -102,7 +101,9 @@ class PositionManager:
             old = target_pct
             target_pct = max_allowed - current_total_pct
             if target_pct <= 0:
-                self.logger.warning("最低现金限制（%.0f%%），无法开仓", self.cash_min * 100)
+                self.logger.warning(
+                    "最低现金限制（%.0f%%），无法开仓", self.cash_min * 100
+                )
                 return None
             self.logger.info(
                 "最低现金限制: %.1f%% -> %.1f%%", old * 100, target_pct * 100,
@@ -121,21 +122,39 @@ class PositionManager:
         )
 
     def calc_sell(self, signal: str, current_stock_pct: float,
-                  stock_code: str = "") -> TradeOrder | None:
-        """计算减仓/清仓指令。"""
+                  stock_code: str = "") -> 'TradeOrder | None':
+        """计算减仓/清仓指令。
+
+        P1-2 修复: EXIT(M21破位)→MARKET  SECTOR_EXIT(退潮)→LIMIT
+        """
         if signal == "REDUCE":
-            sell_pct = current_stock_pct * 0.5  # 减半仓
             return TradeOrder(
                 stock_code=stock_code,
                 direction=TradeDirection.SELL,
-                target_pct=round(sell_pct, 4),
+                target_pct=round(current_stock_pct * 0.5, 4),
                 price_type="LIMIT",
             )
-        elif signal in ("EXIT", "STOP_LOSS"):
+        elif signal == "EXIT":
+            # MA21 破位 → 市价清仓（紧急）
             return TradeOrder(
                 stock_code=stock_code,
                 direction=TradeDirection.SELL,
-                target_pct=current_stock_pct,  # 全部清仓
-                price_type="MARKET",            # 市价单，保命优先
+                target_pct=current_stock_pct,
+                price_type="MARKET",
+            )
+        elif signal == "SECTOR_EXIT":
+            # P1-2: 板块退潮 → 限价清仓（非紧急）
+            return TradeOrder(
+                stock_code=stock_code,
+                direction=TradeDirection.SELL,
+                target_pct=current_stock_pct,
+                price_type="LIMIT",
+            )
+        elif signal == "STOP_LOSS":
+            return TradeOrder(
+                stock_code=stock_code,
+                direction=TradeDirection.SELL,
+                target_pct=current_stock_pct,
+                price_type="MARKET",
             )
         return None

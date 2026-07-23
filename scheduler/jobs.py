@@ -38,5 +38,19 @@ def register_jobs(scheduler, weekly, daily, monthly):
         name="月度绩效报告",
     )
 
+    # P1-1: 盘中每 5 分钟价格轮询止损
+    scheduler.add_job(
+        _placeholder_stop_check,
+        trigger="interval",
+        minutes=5,
+        id="stop_loss_poll",
+        name="价格轮询止损",
+    )
+
     logger = logging.getLogger("scheduler.jobs")
-    logger.info("定时任务注册完成: weekly_scan / daily_eod / monthly_report")
+    logger.info("定时任务注册完成: weekly/daily/monthly + stop_loss_poll")
+
+
+def _placeholder_stop_check():
+    """P1-1: 价格轮询占位。M5 替换为真正的 PositionManager + RiskController 集成。"""
+    pass
