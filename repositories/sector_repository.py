@@ -38,6 +38,13 @@ class SectorRepository:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_by_id(self, sector_id: int) -> dict | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM sector WHERE id = ?", (sector_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def get_all_active(self) -> list[dict]:
         with self._conn() as c:
             rows = c.execute(

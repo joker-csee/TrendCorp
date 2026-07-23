@@ -108,6 +108,107 @@ def main():
     initialize()
 
 
+def run_weekly():
+    """M3: 手动触发周度 Workflow。"""
+    ctx = _setup_m3_context()
+    from workflow.weekly_workflow import WeeklyWorkflow
+    wf = WeeklyWorkflow(
+        market=ctx["market"],
+        scanner=ctx["scanner"],
+        theme_selector=ctx["theme_selector"],
+        screener=ctx["screener"],
+        sector_repo=ctx["sector_repo"],
+        stock_repo=ctx["stock_repo"],
+        core_score_repo=ctx["core_score_repo"],
+    )
+    wf.run()
+
+
+def run_daily():
+    """M3: 手动触发日终 Workflow。"""
+    ctx = _setup_m3_context()
+    from workflow.daily_workflow import DailyWorkflow
+    wf = DailyWorkflow(
+        market=ctx["market"],
+        ma_monitor=ctx["ma_monitor"],
+        theme_monitor=ctx["theme_monitor"],
+        position_repo=ctx["position_repo"],
+        trade_repo=ctx["trade_repo"],
+        nav_repo=ctx["nav_repo"],
+        sector_repo=ctx["sector_repo"],
+        initial_capital=ctx["config"].initial_capital,
+    )
+    wf.run()
+
+
+def run_monthly():
+    """M3: 手动触发月度 Workflow。"""
+    ctx = _setup_m3_context()
+    from workflow.monthly_workflow import MonthlyWorkflow
+    wf = MonthlyWorkflow(
+        trade_repo=ctx["trade_repo"],
+        nav_repo=ctx["nav_repo"],
+    )
+    return wf.run()
+
+
+def _setup_m3_context():
+    """M3: 初始化所有组件（复用 initialize 的数据层 + 新建 Engine）。"""
+    import logging as _logging
+    cfg = AppConfig()
+    setup_logging(cfg.log_dir, cfg.log_level)
+    logger = _logging.getLogger("app")
+
+    market = MarketProvider()
+    financial = FinancialProvider()
+    announcement = AnnouncementProvider()
+
+    from repositories.sector_repository import SectorRepository
+    from repositories.stock_repository import StockRepository
+    from repositories.nav_repository import NavRepository
+    from repositories.core_score_repository import CoreScoreRepository
+    from repositories.position_repository import PositionRepository
+    from repositories.trade_repository import TradeRepository
+
+    sector_repo = SectorRepository(cfg.db_path)
+    stock_repo = StockRepository(cfg.db_path)
+    nav_repo = NavRepository(cfg.db_path)
+    core_score_repo = CoreScoreRepository(cfg.db_path)
+    position_repo = PositionRepository(cfg.db_path)
+    trade_repo = TradeRepository(cfg.db_path)
+
+    from engine.scanner.scanner import MarketScanner
+    from engine.theme_selector import ThemeSelector
+    from engine.screener.screener import CoreScreener
+    from engine.ma_monitor import MAMonitor
+    from engine.theme_monitor import ThemeMonitor
+
+    scanner = MarketScanner(market, cfg.scanner.weights, cfg.scanner.candidate_threshold)
+    theme_selector = ThemeSelector(cfg.scanner.confirmed_min_score)
+    screener = CoreScreener(market, financial, cfg.screener.weights,
+                            cfg.screener.score_threshold, cfg.screener.top_n_per_sector)
+    ma_monitor = MAMonitor(market)
+    theme_monitor = ThemeMonitor(market)
+
+    return {
+        "config": cfg,
+        "market": market,
+        "financial": financial,
+        "announcement": announcement,
+        "sector_repo": sector_repo,
+        "stock_repo": stock_repo,
+        "nav_repo": nav_repo,
+        "core_score_repo": core_score_repo,
+        "position_repo": position_repo,
+        "trade_repo": trade_repo,
+        "scanner": scanner,
+        "theme_selector": theme_selector,
+        "screener": screener,
+        "ma_monitor": ma_monitor,
+        "theme_monitor": theme_monitor,
+    }
+
+
 def dashboard():
     """M2: 终端仪表盘模式。"""
     import sys
@@ -140,7 +241,15 @@ def dashboard():
 
 
 if __name__ == "__main__":
-    if "--dashboard" in __import__("sys").argv:
+    import sys
+    argv = sys.argv
+    if "--dashboard" in argv:
         dashboard()
+    elif "--weekly" in argv:
+        run_weekly()
+    elif "--daily" in argv:
+        run_daily()
+    elif "--monthly" in argv:
+        run_monthly()
     else:
         main()
