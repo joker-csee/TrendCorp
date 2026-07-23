@@ -135,7 +135,58 @@ async def api_workflow_scan(request: Request):
             core_score_repo=app.state.core_score_repo,
         )
         wf.run()
-        return APIResponse.ok(message="周度扫描完成")
+        # P1-6: 返回扫描统计
+        snapshots = app.state.sector_repo.get_latest_snapshot()
+        confirmed = sum(1 for s in snapshots if s.get("is_confirmed") == 2)
+        return APIResponse.ok(data={
+            "total_scanned": len(snapshots),
+            "confirmed_themes": confirmed,
+        }, message=f"扫描完成: {len(snapshots)}板块, {confirmed}确认主线")
+    except Exception as e:
+        return APIResponse.fail(message=str(e))
+
+
+# P0-3: 日终 Workflow Web 端点
+@router.post("/api/workflow/eod", response_model=APIResponse)
+async def api_workflow_eod(request: Request):
+    try:
+        from workflow.daily_workflow import DailyWorkflow
+        app = request.app
+        wf = DailyWorkflow(
+            market=app.state.market,
+            ma_monitor=app.state.ma_monitor,
+            theme_monitor=app.state.theme_monitor,
+            position_repo=app.state.position_repo,
+            trade_repo=app.state.trade_repo,
+            nav_repo=app.state.nav_repo,
+            sector_repo=app.state.sector_repo,
+            stock_repo=app.state.stock_repo,
+            initial_capital=app.state.cfg.initial_capital,
+        )
+        wf.run()
+        return APIResponse.ok(message="日终更新完成")
+    except Exception as e:
+        return APIResponse.fail(message=str(e))
+
+
+# P1-2: 平仓 API
+@router.post("/api/trade/close", response_model=APIResponse)
+async def api_trade_close(request: Request):
+    try:
+        body = await request.json()
+        trade_id = body["trade_id"]
+        close_price = body["close_price"]
+        close_reason = body.get("close_reason", "TAKE_PROFIT")
+        rule_compliant = body.get("rule_compliant", True)
+        lesson = body.get("lesson")
+        request.app.state.trade_logger.log_close(
+            trade_id=trade_id,
+            close_price=close_price,
+            close_reason=close_reason,
+            rule_compliant=rule_compliant,
+            lesson=lesson,
+        )
+        return APIResponse.ok(message="平仓记录已更新")
     except Exception as e:
         return APIResponse.fail(message=str(e))
 

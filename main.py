@@ -153,6 +153,18 @@ def serve():
 
     app = FastAPI(title="趋势中军交易系统", version="1.0")
     app.mount("/static", StaticFiles(directory="web/static"), name="static")
+
+    # P0-4: 全局异常处理器 — 未捕获异常返回统一 APIResponse 格式
+    from fastapi.responses import JSONResponse as _JR
+    from web.schemas import APIResponse as _AR
+
+    @app.exception_handler(Exception)
+    async def _global_handler(request, exc):
+        return _JR(
+            status_code=200,
+            content=_AR.fail(message=str(exc)).model_dump(),
+        )
+
     app.include_router(router)
 
     # 挂载所有组件到 app.state
