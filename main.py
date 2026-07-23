@@ -1,8 +1,9 @@
-# 趋势中军交易系统 — 应用入口
+# 趋势中军交易系统 — 应用入口 (v1.0 M5)
 import logging
 import os
 import sqlite3
-from datetime import date, timedelta
+import sys
+from datetime import date
 
 from config import AppConfig, setup_logging
 from data.providers.market_provider import MarketProvider
@@ -11,14 +12,14 @@ from data.providers.announcement_provider import AnnouncementProvider
 from repositories.sector_repository import SectorRepository
 from repositories.stock_repository import StockRepository
 from repositories.nav_repository import NavRepository
+from repositories.core_score_repository import CoreScoreRepository
+from repositories.position_repository import PositionRepository
+from repositories.trade_repository import TradeRepository
+from repositories.risk_repository import RiskRepository
 
 
 def _init_db(db_path: str):
-    """执行 schema.sql 建表 + 启用 WAL 模式。
-
-    P2-2: DDL 操作天然不适合 Repository 模式（建表不属于 CRUD），
-    故直接在连接上执行。P2-4: 同时启用 WAL 防止后续并发写锁冲突。
-    """
+    """DDL + WAL。P2-2: DDL 不适合 Repository 模式，直接执行。"""
     schema_path = os.path.join(os.path.dirname(__file__), "data", "schema.sql")
     if not os.path.exists(schema_path):
         raise FileNotFoundError(f"schema.sql 不存在: {schema_path}")
@@ -34,7 +35,6 @@ def _init_db(db_path: str):
 
 
 def _init_sectors(market: MarketProvider, sector_repo: SectorRepository):
-    """首次启动时拉取并存储全市场板块列表。"""
     logger = logging.getLogger("init")
     df = market.fetch_all_sectors()
     count = 0
@@ -52,206 +52,177 @@ def _init_sectors(market: MarketProvider, sector_repo: SectorRepository):
 
 
 def _init_initial_nav(cfg: AppConfig, nav_repo: NavRepository):
-    """写入初始净值记录。"""
     today = str(date.today())
     existing = nav_repo.get_latest()
     if existing:
         logging.getLogger("init").info("净值记录已存在，跳过初始化")
         return
-    nav_repo.save_snapshot(
-        snap_date=today,
-        total_value=cfg.initial_capital,
-        cash=cfg.initial_capital,
-        positions_value=0.0,
-    )
-    logging.getLogger("init").info(
-        "初始净值记录写入: ¥%s", f"{cfg.initial_capital:,.0f}"
-    )
+    nav_repo.save_snapshot(today, cfg.initial_capital, cfg.initial_capital, 0.0)
 
 
-def initialize(cfg: AppConfig = None):
-    """执行系统初始化：建表 → 拉取板块 → 写入初始净值。"""
-    if cfg is None:
-        cfg = AppConfig()
-
-    setup_logging(cfg.log_dir, cfg.log_level)
-    logger = logging.getLogger("init")
-    logger.info("趋势中军交易系统 v1.0 - M1 初始化开始")
-
-    _init_db(cfg.db_path)
-
-    market = MarketProvider()
-    financial = FinancialProvider()
-    announcement = AnnouncementProvider()
-
-    sector_repo = SectorRepository(cfg.db_path)
-    stock_repo = StockRepository(cfg.db_path)
-    nav_repo = NavRepository(cfg.db_path)
-
-    _init_sectors(market, sector_repo)
-    _init_initial_nav(cfg, nav_repo)
-
-    logger.info("M1 初始化完成")
-    return {
-        "market": market,
-        "financial": financial,
-        "announcement": announcement,
-        "sector_repo": sector_repo,
-        "stock_repo": stock_repo,
-        "nav_repo": nav_repo,
-        "config": cfg,
-    }
-
-
-def main():
-    """直接启动时执行初始化。"""
-    initialize()
-
-
-def run_weekly():
-    """M3: 手动触发周度 Workflow。"""
-    ctx = _setup_m3_context()
-    from workflow.weekly_workflow import WeeklyWorkflow
-    wf = WeeklyWorkflow(
-        market=ctx["market"],
-        scanner=ctx["scanner"],
-        theme_selector=ctx["theme_selector"],
-        screener=ctx["screener"],
-        sector_repo=ctx["sector_repo"],
-        stock_repo=ctx["stock_repo"],
-        core_score_repo=ctx["core_score_repo"],
-    )
-    wf.run()
-
-
-def run_daily():
-    """M3: 手动触发日终 Workflow。"""
-    ctx = _setup_m3_context()
-    from workflow.daily_workflow import DailyWorkflow
-    wf = DailyWorkflow(
-        market=ctx["market"],
-        ma_monitor=ctx["ma_monitor"],
-        theme_monitor=ctx["theme_monitor"],
-        position_repo=ctx["position_repo"],
-        trade_repo=ctx["trade_repo"],
-        nav_repo=ctx["nav_repo"],
-        sector_repo=ctx["sector_repo"],
-        stock_repo=ctx["stock_repo"],
-        initial_capital=ctx["config"].initial_capital,
-    )
-    wf.run()
-
-
-def run_monthly():
-    """M3: 手动触发月度 Workflow。"""
-    ctx = _setup_m3_context()
-    from workflow.monthly_workflow import MonthlyWorkflow
-    wf = MonthlyWorkflow(
-        trade_repo=ctx["trade_repo"],
-        nav_repo=ctx["nav_repo"],
-    )
-    return wf.run()
-
-
-def _setup_m3_context():
-    """M3: 初始化所有组件（复用 initialize 的数据层 + 新建 Engine）。"""
-    import logging as _logging
-    cfg = AppConfig()
-    setup_logging(cfg.log_dir, cfg.log_level)
-    logger = _logging.getLogger("app")
-
-    market = MarketProvider()
-    financial = FinancialProvider()
-    announcement = AnnouncementProvider()
-
-    from repositories.sector_repository import SectorRepository
-    from repositories.stock_repository import StockRepository
-    from repositories.nav_repository import NavRepository
-    from repositories.core_score_repository import CoreScoreRepository
-    from repositories.position_repository import PositionRepository
-    from repositories.trade_repository import TradeRepository
-
-    sector_repo = SectorRepository(cfg.db_path)
-    stock_repo = StockRepository(cfg.db_path)
-    nav_repo = NavRepository(cfg.db_path)
-    core_score_repo = CoreScoreRepository(cfg.db_path)
-    position_repo = PositionRepository(cfg.db_path)
-    trade_repo = TradeRepository(cfg.db_path)
-
+def create_engines(cfg, market, financial):
+    """M5: 集中创建所有 Engine 对象。"""
     from engine.scanner.scanner import MarketScanner
     from engine.theme_selector import ThemeSelector
     from engine.screener.screener import CoreScreener
     from engine.ma_monitor import MAMonitor
     from engine.theme_monitor import ThemeMonitor
-
-    scanner = MarketScanner(market, cfg.scanner.weights, cfg.scanner.candidate_threshold)
-    theme_selector = ThemeSelector(cfg.scanner.confirmed_min_score)
-    screener = CoreScreener(market, financial, cfg.screener.weights,
-                            cfg.screener.score_threshold, cfg.screener.top_n_per_sector)
-    ma_monitor = MAMonitor(market)
-    theme_monitor = ThemeMonitor(market)
+    from engine.position_manager import PositionManager
+    from engine.risk_controller import RiskController
+    from engine.order_executor import OrderExecutor
 
     return {
-        "config": cfg,
-        "market": market,
-        "financial": financial,
-        "announcement": announcement,
-        "sector_repo": sector_repo,
-        "stock_repo": stock_repo,
-        "nav_repo": nav_repo,
-        "core_score_repo": core_score_repo,
-        "position_repo": position_repo,
-        "trade_repo": trade_repo,
-        "scanner": scanner,
-        "theme_selector": theme_selector,
-        "screener": screener,
-        "ma_monitor": ma_monitor,
-        "theme_monitor": theme_monitor,
+        "scanner": MarketScanner(market, cfg.scanner.weights, cfg.scanner.candidate_threshold),
+        "theme_selector": ThemeSelector(cfg.scanner.confirmed_min_score),
+        "screener": CoreScreener(market, financial, cfg.screener.weights,
+                                  cfg.screener.score_threshold, cfg.screener.top_n_per_sector),
+        "ma_monitor": MAMonitor(market),
+        "theme_monitor": ThemeMonitor(market),
+        "position_mgr": PositionManager(cfg.position.total_cap, cfg.position.single_cap,
+                                         cfg.position.sector_cap, cfg.position.cash_min,
+                                         cfg.position.a_buy_first_pct, cfg.position.b_buy_first_pct),
+        "risk_ctrl": RiskController(cfg.risk.stock_loss_limit, cfg.risk.daily_dd_limit,
+                                     cfg.risk.weekly_dd_limit, cfg.risk.monthly_dd_limit,
+                                     cfg.risk.strategy_dd_limit, cfg.risk.consecutive_stop_limit),
+        "order_executor": OrderExecutor(),
     }
 
 
-def dashboard():
-    """M2: 终端仪表盘模式。"""
-    import sys
+def create_repos(cfg):
+    return {
+        "sector_repo": SectorRepository(cfg.db_path),
+        "stock_repo": StockRepository(cfg.db_path),
+        "nav_repo": NavRepository(cfg.db_path),
+        "core_score_repo": CoreScoreRepository(cfg.db_path),
+        "position_repo": PositionRepository(cfg.db_path),
+        "trade_repo": TradeRepository(cfg.db_path),
+        "risk_repo": RiskRepository(cfg.db_path),
+    }
+
+
+def create_journal(trade_repo, stock_repo, sector_repo, nav_repo):
+    from journal.trade_logger import TradeLogger
+    from journal.monthly_report import MonthlyReport
+    return {
+        "trade_logger": TradeLogger(trade_repo, stock_repo, sector_repo),
+        "monthly_report": MonthlyReport(trade_repo, nav_repo, sector_repo),
+    }
+
+
+def serve():
+    """M5: 启动 FastAPI Web 服务。"""
     cfg = AppConfig()
     setup_logging(cfg.log_dir, cfg.log_level)
     logger = logging.getLogger("app")
+    logger.info("趋势中军交易系统 v1.0 — Web 服务启动")
 
-    # 初始化数据层
+    _init_db(cfg.db_path)
+
     market = MarketProvider()
     financial = FinancialProvider()
-    sector_repo = SectorRepository(cfg.db_path)
-    nav_repo = NavRepository(cfg.db_path)
+    announcement = AnnouncementProvider()
 
-    # P1-6 修复: 先检查板块数据是否存在，存在则跳过拉取
-    _init_db(cfg.db_path)
-    existing_sectors = sector_repo.get_all_active()
-    if existing_sectors:
-        logger.info("板块数据已存在（%d 个），跳过拉取", len(existing_sectors))
-    else:
-        # N1: sector 表为空 + API 不可用时不应崩溃
+    repos = create_repos(cfg)
+    engines = create_engines(cfg, market, financial)
+    journals = create_journal(repos["trade_repo"], repos["stock_repo"],
+                               repos["sector_repo"], repos["nav_repo"])
+
+    # 初始化板块数据
+    existing = repos["sector_repo"].get_all_active()
+    if not existing:
         try:
-            _init_sectors(market, sector_repo)
+            _init_sectors(market, repos["sector_repo"])
         except RuntimeError as e:
             logger.warning("板块初始化失败（网络不可用）: %s", e)
-    _init_initial_nav(cfg, nav_repo)
+    else:
+        logger.info("板块数据已存在（%d 个），跳过拉取", len(existing))
+    _init_initial_nav(cfg, repos["nav_repo"])
 
-    from engine.dashboard import build_dashboard, print_dashboard
-    data = build_dashboard(cfg, market, financial, sector_repo, nav_repo)
-    print_dashboard(data)
+    # RiskController 注入 RiskRepository
+    engines["risk_ctrl"].risk_repo = repos["risk_repo"]
+
+    # FastAPI 应用
+    from fastapi import FastAPI
+    from fastapi.staticfiles import StaticFiles
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from web.router import router
+    from scheduler.jobs import register_jobs
+    from workflow.weekly_workflow import WeeklyWorkflow
+    from workflow.daily_workflow import DailyWorkflow
+    from workflow.monthly_workflow import MonthlyWorkflow
+
+    app = FastAPI(title="趋势中军交易系统", version="1.0")
+    app.mount("/static", StaticFiles(directory="web/static"), name="static")
+    app.include_router(router)
+
+    # 挂载所有组件到 app.state
+    app.state.cfg = cfg
+    app.state.market = market
+    app.state.financial = financial
+    for name, obj in {**repos, **engines, **journals}.items():
+        setattr(app.state, name, obj)
+
+    # 注册定时任务
+    scheduler = BackgroundScheduler()
+    wf_weekly = WeeklyWorkflow(
+        market=market, scanner=engines["scanner"],
+        theme_selector=engines["theme_selector"],
+        screener=engines["screener"],
+        sector_repo=repos["sector_repo"],
+        stock_repo=repos["stock_repo"],
+        core_score_repo=repos["core_score_repo"],
+    )
+    wf_daily = DailyWorkflow(
+        market=market, ma_monitor=engines["ma_monitor"],
+        theme_monitor=engines["theme_monitor"],
+        position_repo=repos["position_repo"],
+        trade_repo=repos["trade_repo"],
+        nav_repo=repos["nav_repo"],
+        sector_repo=repos["sector_repo"],
+        stock_repo=repos["stock_repo"],
+        initial_capital=cfg.initial_capital,
+    )
+    wf_monthly = MonthlyWorkflow(
+        trade_repo=repos["trade_repo"],
+        nav_repo=repos["nav_repo"],
+    )
+    register_jobs(scheduler, wf_weekly, wf_daily, wf_monthly)
+    scheduler.start()
+    logger.info("定时任务已注册: weekly/daily/monthly/stop_loss_poll")
+
+    logger.info("Web 服务就绪 → http://localhost:8000")
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 
-# P2-3: FIXME(M5) — 替换 CLI 入口为 FastAPI POST /api/workflow/scan + /eod 端点
+def main():
+    """直接启动时执行初始化。"""
+    cfg = AppConfig()
+    setup_logging(cfg.log_dir, cfg.log_level)
+    _init_db(cfg.db_path)
+    market = MarketProvider()
+    repos = create_repos(cfg)
+    _init_sectors(market, repos["sector_repo"])
+    _init_initial_nav(cfg, repos["nav_repo"])
+    logging.getLogger("init").info("M1-M5 初始化完成")
+
+
+# CLI 入口
 if __name__ == "__main__":
-    import sys
     argv = sys.argv
-    if "--dashboard" in argv:
-        dashboard()
-    elif "--weekly" in argv:
-        run_weekly()
-    elif "--daily" in argv:
-        run_daily()
-    elif "--monthly" in argv:
-        run_monthly()
+    if "--serve" in argv or "--web" in argv:
+        serve()
+    elif "--dashboard" in argv:
+        # Legacy M2 terminal dashboard
+        cfg = AppConfig()
+        setup_logging(cfg.log_dir, cfg.log_level)
+        market = MarketProvider(); financial = FinancialProvider()
+        repos = create_repos(cfg)
+        _init_db(cfg.db_path)
+        from engine.dashboard import build_dashboard, print_dashboard
+        data = build_dashboard(cfg, market, financial,
+                               repos["sector_repo"], repos["nav_repo"],
+                               risk_repo=repos["risk_repo"])
+        print_dashboard(data)
     else:
         main()

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>当前持仓</h1>
+<div hx-get="/api/positions" hx-trigger="load, every 60s" hx-target="#pos-table">
+  <table class="data-table" id="pos-table">
+    <thead><tr><th>ID</th><th>成本</th><th>占比</th><th>MA10</th><th>MA21</th><th>预警</th></tr></thead>
+    <tbody><tr><td colspan="6">加载中...</td></tr></tbody>
+  </table>
+</div>
+
+<h2>风控状态</h2>
+<div hx-get="/api/risk/status" hx-trigger="load" hx-target="#risk-events">
+  <table class="data-table" id="risk-events">
+    <thead><tr><th>时间</th><th>类型</th><th>级别</th><th>详情</th></tr></thead>
+    <tbody><tr><td colspan="4">加载中...</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}

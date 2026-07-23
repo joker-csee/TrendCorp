@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>趋势中军交易系统</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://unpkg.com/htmx.org@1.9"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <span class="brand">趋势中军 v1.0</span>
+    <a href="/">仪表盘</a>
+    <a href="/scanner">扫描</a>
+    <a href="/positions">持仓</a>
+    <a href="/journal">日志</a>
+    <a href="/report">报告</a>
+    <span id="fuse-indicator" class="fuse-normal">风控正常</span>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

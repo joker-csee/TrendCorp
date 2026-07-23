@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>主线扫描</h1>
+
+<button hx-post="/api/workflow/scan" hx-target="#scan-result" hx-indicator="#scan-spinner">
+  手动触发扫描
+</button>
+<span id="scan-spinner" class="htmx-indicator">扫描中...</span>
+
+<div id="scan-result">
+  <p>点击按钮触发周度扫描，或查看下方最新结果。</p>
+</div>
+
+<h2>最新扫描快照</h2>
+<div hx-get="/api/scanner/latest" hx-trigger="load" hx-target="#snapshot-table">
+  <table class="data-table" id="snapshot-table">
+    <thead><tr><th>板块</th><th>总分</th><th>趋势</th><th>相对</th><th>资金</th><th>梯队</th><th>状态</th></tr></thead>
+    <tbody><tr><td colspan="7">加载中...</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}

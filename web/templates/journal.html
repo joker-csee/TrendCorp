@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>交易日志</h1>
+
+<details>
+  <summary>+ 录入新交易</summary>
+  <form hx-post="/api/trade/log" hx-target="#log-result" hx-swap="afterbegin" style="margin:10px 0">
+    <input name="stock_code" placeholder="股票代码" required style="width:100px">
+    <input name="open_price" type="number" step="0.01" placeholder="开仓价" required style="width:100px">
+    <input name="open_reason" placeholder="开仓理由" value="A_MA10_BOUNCE" style="width:160px">
+    <input name="open_ma10" type="number" step="0.01" placeholder="MA10">
+    <input name="position_pct" type="number" step="0.1" placeholder="仓位%">
+    <button type="submit">提交</button>
+  </form>
+</details>
+
+<div id="log-result"></div>
+
+<h2>最近交易</h2>
+<table class="data-table">
+  <thead><tr><th>编号</th><th>开仓日</th><th>平仓日</th><th>盈亏%</th><th>合规</th></tr></thead>
+  <tbody>
+    <tr><td colspan="5">M5 Web 阶段通过 /api/trade/log 录入</td></tr>
+  </tbody>
+</table>
+{% endblock %}

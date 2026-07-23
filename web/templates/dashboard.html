@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>仪表盘</h1>
+
+<div class="cards" id="nav-cards">
+  <div class="card"><span class="label">总净值</span><span class="value" id="nav-total">—</span></div>
+  <div class="card"><span class="label">今日</span><span class="value" id="nav-daily">—</span></div>
+  <div class="card"><span class="label">本周</span><span class="value" id="nav-weekly">—</span></div>
+  <div class="card"><span class="label">本月</span><span class="value" id="nav-monthly">—</span></div>
+  <div class="card"><span class="label">仓位</span><span class="value" id="nav-pos">—</span></div>
+  <div class="card"><span class="label">可用</span><span class="value" id="nav-cash">—</span></div>
+</div>
+
+<div style="margin:20px 0">
+  <canvas id="navChart" height="80"></canvas>
+</div>
+
+<h2>持仓</h2>
+<table class="data-table" id="holdings-table">
+  <thead><tr><th>代码</th><th>名称</th><th>信号</th><th>浮盈</th><th>MA10</th><th>板块</th></tr></thead>
+  <tbody><tr><td colspan="6">加载中...</td></tr></tbody>
+</table>
+
+<h2>主线信号</h2>
+<table class="data-table" id="signals-table">
+  <thead><tr><th>代码</th><th>名称</th><th>主线</th><th>信号</th><th>评分</th><th>MA10偏离</th></tr></thead>
+  <tbody><tr><td colspan="6">加载中...</td></tr></tbody>
+</table>
+{% endblock %}

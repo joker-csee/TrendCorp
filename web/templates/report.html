@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>月度报告</h1>
+<div hx-get="/api/report" hx-trigger="load" hx-target="#report-content">
+  <div id="report-content">加载中...</div>
+</div>
+{% endblock %}
