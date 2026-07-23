@@ -136,6 +136,7 @@ def run_daily():
         trade_repo=ctx["trade_repo"],
         nav_repo=ctx["nav_repo"],
         sector_repo=ctx["sector_repo"],
+        stock_repo=ctx["stock_repo"],
         initial_capital=ctx["config"].initial_capital,
     )
     wf.run()
@@ -240,6 +241,7 @@ def dashboard():
     print_dashboard(data)
 
 
+# P2-3: FIXME(M5) — 替换 CLI 入口为 FastAPI POST /api/workflow/scan + /eod 端点
 if __name__ == "__main__":
     import sys
     argv = sys.argv

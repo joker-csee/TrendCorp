@@ -53,14 +53,8 @@ class TradeLogger:
     def log_close(self, trade_id: int, close_price: float,
                   close_reason: str, rule_compliant: bool = True,
                   lesson: str = None):
-        """录入平仓。自动计算盈亏。"""
-        # 获取原交易记录
-        trades = self.trade_repo.get_all(limit=100)
-        trade = None
-        for t in trades:
-            if t["id"] == trade_id:
-                trade = t
-                break
+        """录入平仓。自动计算盈亏。P2-2 修复: 直接按主键查询。"""
+        trade = self.trade_repo.get_by_id(trade_id)
         if not trade:
             raise ValueError(f"交易记录不存在: id={trade_id}")
 
@@ -84,9 +78,10 @@ class TradeLogger:
             close_price, pnl_pct * 100, rule_compliant,
         )
 
-    @staticmethod
-    def _gen_trade_no() -> str:
+    def _gen_trade_no(self) -> str:
+        """P1-2 修复: 从 DB 查询当日最大序号 +1，避免 random 碰撞。"""
         today = date.today().strftime("%Y%m%d")
-        import random
-        seq = random.randint(100, 999)
-        return f"T-{today}-{seq}"
+        prefix = f"T-{today}"
+        last_seq = self.trade_repo.get_max_seq_today(prefix)
+        seq = last_seq + 1
+        return f"{prefix}-{seq:03d}"

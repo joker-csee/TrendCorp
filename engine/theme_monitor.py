@@ -12,8 +12,12 @@ class ThemeMonitor:
         self.market = market
         self.logger = logging.getLogger("app.theme_monitor")
 
-    def check(self, sector_code: str, sec_type: str, check_date: date) -> dict:
-        """返回 {alert_level: 0|1|2, triggers: [...]}"""
+    def check(self, sector_code: str, sec_type: str, check_date: date,
+              core_codes: list[str] = None) -> dict:
+        """返回 {alert_level: 0|1|2, triggers: [...]}。
+
+        P1-5 修复: core_codes 用于检查第4条件（中军放量长阴）。
+        """
         triggers = []
 
         # 1. 连续 3 天跑输沪深 300
@@ -28,8 +32,11 @@ class ThemeMonitor:
         if self._volume_shrinking(sector_code, sec_type, check_date):
             triggers.append("成交萎缩>40%")
 
-        # 4. 中军放量长阴
-        # (M2 阶段不依赖中军持仓列表，M3 Workflow 中补充)
+        # 4. 中军放量长阴 — P1-5: M3 实现
+        # FIXME(M4): 需要 Workflow 传入中军标的列表（当前从持仓推断）
+        if core_codes:
+            if self._core_crash_detected(core_codes, check_date):
+                triggers.append("中军放量长阴")
 
         cnt = len(triggers)
         alert_level = 0
@@ -45,6 +52,25 @@ class ThemeMonitor:
             )
 
         return {"alert_level": alert_level, "triggers": triggers}
+
+    def _core_crash_detected(self, codes: list[str], check_date) -> bool:
+        """检查持仓中是否有放量长阴（跌幅>5%+量>20日均量的2倍）。"""
+        from datetime import timedelta
+        for code in codes:
+            try:
+                start = check_date - timedelta(days=30)
+                df = self.market.fetch_stock_daily(code, start, check_date)
+                if len(df) < 2:
+                    continue
+                latest = df.iloc[-1]
+                prev = df.iloc[-2]
+                pct = (latest["close"] - prev["close"]) / prev["close"]
+                avg_vol_20 = df["volume"].tail(20).mean() if "volume" in df.columns else 0
+                if pct <= -0.05 and avg_vol_20 > 0 and latest.get("volume", 0) > avg_vol_20 * 2:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _underperforming(self, code, sec_type, check_date) -> bool:
         try:

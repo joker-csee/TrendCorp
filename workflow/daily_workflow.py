@@ -9,6 +9,7 @@ from repositories.position_repository import PositionRepository
 from repositories.trade_repository import TradeRepository
 from repositories.nav_repository import NavRepository
 from repositories.sector_repository import SectorRepository
+from repositories.stock_repository import StockRepository
 
 
 class DailyWorkflow(BaseWorkflow):
@@ -21,6 +22,7 @@ class DailyWorkflow(BaseWorkflow):
                  trade_repo: TradeRepository,
                  nav_repo: NavRepository,
                  sector_repo: SectorRepository,
+                 stock_repo: StockRepository,
                  initial_capital: float = 100_000.0):
         super().__init__()
         self.market = market
@@ -30,6 +32,7 @@ class DailyWorkflow(BaseWorkflow):
         self.trade_repo = trade_repo
         self.nav_repo = nav_repo
         self.sector_repo = sector_repo
+        self.stock_repo = stock_repo
         self.initial_capital = initial_capital
 
     def execute(self):
@@ -37,19 +40,32 @@ class DailyWorkflow(BaseWorkflow):
         snap = today.isoformat()
 
         # Step 1: 更新持仓行情
+        # P0-1 修复: 通过 stock 表将 stock_id 解析为 stock_code
         self.logger.info("Step 1/5: 更新持仓标的行情")
         positions = self.position_repo.get_all()
         holdings = []
         for pos in positions:
+            stock_id = pos.get("stock_id")
+            if not stock_id:
+                continue
+            stock = self.stock_repo.get_by_id(stock_id)
+            stock_code = stock["code"] if stock else None
+            if not stock_code:
+                self.logger.warning("持仓 stock_id=%d 无对应 stock 记录", stock_id)
+                continue
             try:
                 result = self.ma_monitor.check(
-                    stock_code=str(pos.get("stock_id", "")),
+                    stock_code=stock_code,
                     snap_date=today,
                 )
-                holdings.append({**pos, **result})
+                # 补充 sector_id（从 stock 表获取）
+                holdings.append({
+                    **pos, **result,
+                    "stock_code": stock_code,
+                    "sector_id": stock.get("sector_id"),
+                })
             except Exception as e:
-                self.logger.warning("持仓 %s 行情更新失败: %s",
-                                    pos.get("stock_id"), e)
+                self.logger.warning("持仓 %s 行情更新失败: %s", stock_code, e)
 
         # Step 2: 均线信号更新
         self.logger.info("Step 2/5: 均线信号检查")
@@ -59,20 +75,26 @@ class DailyWorkflow(BaseWorkflow):
                 sig_str = str(sig).replace("SignalType.", "")
                 if sig_str in ("REDUCE", "EXIT"):
                     self.logger.info(
-                        "持仓 %s: 触发 %s 信号", h.get("stock_id"), sig_str
+                        "持仓 %s: 触发 %s 信号", h.get("stock_code"), sig_str
                     )
 
         # Step 3: 退潮预警
+        # P0-2 修复: 通过 stock 表获取 sector_id
         self.logger.info("Step 3/5: 板块退潮预警")
-        # 收集持仓涉及的所有板块
         sector_ids = {h.get("sector_id") for h in holdings if h.get("sector_id")}
         for sid in sector_ids:
             sec = self.sector_repo.get_by_id(sid)
             if not sec:
                 continue
             try:
+                # P1-5 修复: 传递持仓标的中属于该板块的代码，用于第4条件检查
+                sector_stocks = [
+                    h["stock_code"] for h in holdings
+                    if h.get("sector_id") == sid
+                ]
                 alert = self.theme_monitor.check(
-                    sec["code"], sec["type"], today
+                    sec["code"], sec["type"], today,
+                    core_codes=sector_stocks,
                 )
                 if alert["alert_level"] > 0:
                     self.logger.info(
@@ -85,17 +107,17 @@ class DailyWorkflow(BaseWorkflow):
                 )
 
         # Step 4: 计算净值
+        # P1-4 修复: 从上次快照读取现金，持仓浮动反映真实涨跌
         self.logger.info("Step 4/5: 更新净值快照")
         latest_nav = self.nav_repo.get_latest()
+        prev_cash = latest_nav["cash"] if latest_nav else self.initial_capital
         prev_total = latest_nav["total_value"] if latest_nav else self.initial_capital
 
         positions_value = sum(
-            (h.get("current_price", 0) or 0) * (h.get("shares", 0) or 0)
+            (h.get("price", 0) or 0) * (h.get("shares", 0) or 0)
             for h in holdings
         )
-        # 现金 = 总净值 - 持仓市值（简化）
-        cash = max(0, prev_total - positions_value)
-        total_value = cash + positions_value
+        total_value = prev_cash + positions_value
         daily_ret = (total_value - prev_total) / prev_total if prev_total > 0 else 0
         pos_pct = positions_value / total_value if total_value > 0 else 0
 
@@ -109,7 +131,7 @@ class DailyWorkflow(BaseWorkflow):
         self.nav_repo.save_snapshot(
             snap_date=snap,
             total_value=total_value,
-            cash=cash,
+            cash=prev_cash,  # 现金不变（未执行交易时）
             positions_value=positions_value,
             daily_return=round(daily_ret, 6),
             max_drawdown=round(mdd, 6),

@@ -36,6 +36,14 @@ class StockRepository:
             )
             return cur.fetchone()["id"]
 
+    def get_by_id(self, stock_id: int) -> dict | None:
+        """P2-1: 按主键查询。"""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM stock WHERE id = ?", (stock_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def get_by_code(self, code: str) -> dict | None:
         with self._conn() as c:
             row = c.execute(

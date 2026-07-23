@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS trade (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS position (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    stock_id        INTEGER REFERENCES stock(id),
+    stock_id        INTEGER UNIQUE REFERENCES stock(id),
     trade_id        INTEGER REFERENCES trade(id),
     shares          INTEGER NOT NULL DEFAULT 0,
     avg_cost        REAL NOT NULL,

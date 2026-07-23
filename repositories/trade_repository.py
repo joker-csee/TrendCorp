@@ -20,6 +20,29 @@ class TradeRepository:
         finally:
             conn.close()
 
+    def get_by_id(self, trade_id: int) -> dict | None:
+        """P2-2: 按主键查询。"""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM trade WHERE id = ?", (trade_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_max_seq_today(self, prefix: str) -> int:
+        """返回当日最大 trade_no 序号（用于防碰撞生成）。"""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT MAX(trade_no) FROM trade WHERE trade_no LIKE ?",
+                (f"{prefix}%",),
+            ).fetchone()
+            val = row[0]
+            if val:
+                try:
+                    return int(val.rsplit("-", 1)[-1])
+                except (ValueError, IndexError):
+                    pass
+            return 0
+
     def insert(self, trade_no: str, stock_id: int, sector_id: int = None,
                open_date: str = "", open_price: float = 0.0,
                open_reason: str = "", open_ma10: float = None,
